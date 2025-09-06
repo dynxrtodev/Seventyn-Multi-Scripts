@@ -394,20 +394,46 @@ RunThread(function()
         end
 
         -- MIRRORMAZE State Machine
+        -- fungsi cek player lain
+local function IsOtherPlayerNearby()
+    local me = GetLocal()
+    if not me then return false end
+    for _, p in pairs(GetPlayerList()) do
+        if p.netid ~= me.netid then
+            return true, p.name
+        end
+    end
+    return false, nil
+end
+
+-- init cycle counter
+MIRRORMAZE.count = 0
+
+-- mirrormaze loop
+RunThread(function()
+    while true do
         if MIRRORMAZE.running then
+            -- cek dulu ada player lain ga
+            local found, pname = IsOtherPlayerNearby()
+            if found then
+                logMessage("`4Mirrormaze: Player lain terdeteksi ("..pname.."), auto-leave world!")
+                SendPacket(3, "action|quit_to_exit")
+                MIRRORMAZE.running = false
+                goto continue_loop
+            end
+
             local me = GetLocal()
-            if not me then Sleep(50); goto continue_loop end -- Skip if local player not found
+            if not me then Sleep(50); goto continue_loop end
             local px = math.floor(me.pos.x / 32)
             local py = math.floor(me.pos.y / 32)
 
-            if MIRRORMAZE.state == 0 then -- Initial state, go to door
-                logMessage("Mirrormaze: Going to door at (" .. MIRRORMAZE.doorX .. "," .. MIRRORMAZE.doorY .. ")")
-                FindPath(MIRRORMAZE.doorX, MIRRORMAZE.doorY)
+            if MIRRORMAZE.state == 0 then -- Step 1: ke pintu
+                FindPath(MIRRORMAZE.doorX, MIRRORMAZE.doorY, 100)
                 MIRRORMAZE.state = 1
-                Sleep(1000) -- Give time to pathfind
-            elseif MIRRORMAZE.state == 1 then -- At door, enter
+                Sleep(150)
+
+            elseif MIRRORMAZE.state == 1 then -- Step 2: masuk pintu
                 if px == MIRRORMAZE.doorX and py == MIRRORMAZE.doorY then
-                    logMessage("Mirrormaze: Entering door.")
                     SendPacketRaw(false, {
                         type  = 7,
                         value = 18,
@@ -415,30 +441,37 @@ RunThread(function()
                         py    = MIRRORMAZE.doorY
                     })
                     MIRRORMAZE.state = 2
-                    Sleep(1000) -- Give time for door animation/transition
+                    Sleep(300)
                 else
-                    -- Not at door yet, keep pathfinding
-                    FindPath(MIRRORMAZE.doorX, MIRRORMAZE.doorY)
-                    Sleep(500)
+                    FindPath(MIRRORMAZE.doorX, MIRRORMAZE.doorY, 100)
+                    Sleep(100)
                 end
-            elseif MIRRORMAZE.state == 2 then -- Inside, go to target
-                logMessage("Mirrormaze: Going to target at (" .. MIRRORMAZE.targetX .. "," .. MIRRORMAZE.targetY .. ")")
-                FindPath(MIRRORMAZE.targetX, MIRRORMAZE.targetY)
-                MIRRORMAZE.state = 3
-                Sleep(MIRRORMAZE.delay) -- Wait at target
-            elseif MIRRORMAZE.state == 3 then -- At target, reset
+
+            elseif MIRRORMAZE.state == 2 then -- Step 3: ke target
+                FindPath(MIRRORMAZE.targetX, MIRRORMAZE.targetY, 100)
                 if px == MIRRORMAZE.targetX and py == MIRRORMAZE.targetY then
-                    logMessage("Mirrormaze: Reached target. Resetting cycle.")
-                    MIRRORMAZE.state = 0 -- Reset for next cycle
-                    Sleep(1000) -- Short break before next cycle
+                    MIRRORMAZE.state = 3
+                end
+                Sleep(100)
+
+            elseif MIRRORMAZE.state == 3 then -- Step 4: sampai target, reset
+                MIRRORMAZE.count = (MIRRORMAZE.count or 0) + 1
+                logMessage("`2Mirrormaze cycle selesai ke-"..MIRRORMAZE.count)
+                MIRRORMAZE.state = 0
+
+                if MIRRORMAZE.count >= 100 then
+                    logMessage("`eMirrormaze: Sudah 100x, istirahat 5 detik dulu...")
+                    Sleep(5000)
+                    MIRRORMAZE.count = 0
                 else
-                    -- Not at target yet, keep pathfinding
-                    FindPath(MIRRORMAZE.targetX, MIRRORMAZE.targetY)
-                    Sleep(500)
+                    Sleep(200)
                 end
             end
         end
-
+        ::continue_loop::
+        Sleep(5)
+    end
+end)
         -- SHOP
         if Shop.running then
             SendPacket(2, "action|buy\nitem|"..Shop.itemid)
